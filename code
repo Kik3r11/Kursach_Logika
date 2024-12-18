@@ -1,0 +1,335 @@
+#define _CRT_SECURE_NO_WARNINGS
+#include <limits.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <locale.h>
+#include <time.h>
+#include <stdbool.h>
+
+#define MAX_VERTICES 100 // определить максимум вершин
+#define INF INT_MAX // определить значение бесконечности для инициализации
+
+// структура ребра
+typedef struct {
+    int source; // начальная вершина ребра
+    int destination; // конечная вершина ребра
+    int weight; // вес
+} Edge;
+
+// Функция для чтения графа из файла
+int readGraphFromFile(const char* filename, Edge edges[], int* verticesCount, bool isDirected) {
+    FILE* file = fopen(filename, "r");
+    if (!file) {
+        printf("Ошибка при открытии файла %s!\n", filename);
+        return -1;
+    }
+
+    int edgesCount = 0;
+    fscanf(file, "%d", verticesCount); // Чтение количества вершин
+
+    while (fscanf(file, "%d %d %d", &edges[edgesCount].source,
+        &edges[edgesCount].destination,
+        &edges[edgesCount].weight) == 3) {
+        edgesCount++;
+        if (!isDirected) {
+            edges[edgesCount].source = edges[edgesCount - 1].destination;
+            edges[edgesCount].destination = edges[edgesCount - 1].source;
+            edges[edgesCount].weight = edges[edgesCount - 1].weight;
+            edgesCount++;
+        }
+    }
+    fclose(file);
+    return edgesCount;
+}
+
+int compareEdges(const void* a, const void* b) {
+    return ((Edge*)a)->source - ((Edge*)b)->source;
+}
+
+// функция для вывода графа
+void printGraph(Edge edges[], int edgesCount) {
+    printf("Граф в виде списка ребер:\n");
+    qsort(edges, edgesCount, sizeof(Edge), compareEdges);
+    for (int i = 0; i < edgesCount; i++) {
+        printf("Вершина %d --> Вершина %d (вес: %d)\n", edges[i].source, edges[i].destination, edges[i].weight);
+    }
+}
+
+// функция для сохранения графа в файл
+void printGraphInFile(Edge edges[], int edgesCount, FILE* file) {
+    fprintf(file, "Список рёбер графа:\n");
+    qsort(edges, edgesCount, sizeof(Edge), compareEdges);
+    for (int i = 0; i < edgesCount; i++) {
+        fprintf(file, "Ребро: %d -> %d вес = %d\n", edges[i].source, edges[i].destination, edges[i].weight);
+    }
+}
+
+// алгоритм Форда-Беллмана
+void bellmanFord(Edge edges[], int vertices, int edgesCount, int source) {
+    int* distance = (int*)malloc(vertices * sizeof(int)); // массив для хранения расстояний от исходной вершины до всех остальных
+
+    // инициализация расстояния от источника до всех вершин как бесконечность
+    for (int i = 0; i < vertices; ++i)
+        distance[i] = INF;
+
+    distance[source] = 0; // дистанция из источника до самого себя = 0
+
+    // расслабление ребер vertices - 1 раз
+    for (int i = 0; i < vertices - 1; ++i) {
+        for (int j = 0; j < edgesCount; ++j) {
+            //  это ребро можно расслабить
+            if (distance[edges[j].source] != INF &&
+                distance[edges[j].destination] > distance[edges[j].source] + edges[j].weight) {
+                // обновление расстояния до целевой вершины
+                distance[edges[j].destination] = distance[edges[j].source] + edges[j].weight;
+            }
+        }
+    }
+
+    // проверка на наличие циклов с отрицательным весом
+    for (int i = 0; i < edgesCount; ++i) {
+        // если можно улучшить расстояние - значит есть отрицательный цикл
+        if (distance[edges[i].source] != INF &&
+            distance[edges[i].destination] > distance[edges[i].source] + edges[i].weight) {
+            printf("Присутствует отрицательный цикл\n");
+            free(distance);
+            return; // выход из функции, если цикл есть
+        }
+    }
+
+    // выводится кратчайшие расстояния от источника до всех вершин
+    printf("Вершина   Расстояние от источника\n");
+    for (int i = 0; i < vertices; ++i)
+        // вывод номера вершины и расстояние до неё (-1 если она не достижима)
+        printf("%d \t\t %d\n", i, (distance[i] == INF) ? -1 : distance[i]);
+
+    // Сохранение результатов в файл
+    char filename[100];
+    printf("Хотите сохранить результат в файл? (yes/no): ");
+    char response[4];
+    scanf("%s", response);
+
+    if (strcmp(response, "yes") == 0) {
+        printf("Введите название файла: ");
+        scanf("%s", filename);
+        FILE* file = fopen(filename, "w");
+        if (file == NULL) {
+            printf("Ошибка при открытии файла.\n");
+        }
+        else {
+            fprintf(file, "Результаты алгоритма Форда-Беллмана:\n");
+            fprintf(file, "Вершина   Расстояние от источника\n");
+            for (int i = 0; i < vertices; ++i) {
+                fprintf(file, "%d \t\t %d\n", i, (distance[i] == INF) ? -1 : distance[i]);
+            }
+            printGraphInFile(edges, edgesCount, file);
+            fclose(file);
+            printf("Результат успешно сохранен в файл %s\n", filename);
+        }
+    }
+    free(distance);
+}
+
+// функция для проверку существует ли ребро между вершинами или нет
+bool edgeExists(Edge* edges, int edgesCount, int source, int dest) {
+    for (int i = 0; i < edgesCount; i++) {
+        if ((edges[i].source == source && edges[i].destination == dest) ||
+            (edges[i].source == dest && edges[i].destination == source)) {
+            return true; // если путь уже существует
+        }
+    }
+    return false;
+}
+
+// Функция для обеспечения связности графа без создания дублирующих путей
+void ensurePathToVertex(Edge* edges, int* edgesCount, int source, int destination, bool isDirected) {
+    if (source >= destination) return; // проверка на валидность
+
+    if (!edgeExists(edges, *edgesCount, source, destination)) {
+        edges[*edgesCount].source = source;
+        edges[*edgesCount].destination = destination;
+        edges[*edgesCount].weight = (rand() % 21) - 2; // вес рёбер
+        (*edgesCount)++;
+        if (!isDirected) {
+            edges[*edgesCount].source = destination;
+            edges[*edgesCount].destination = source;
+            edges[*edgesCount].weight = edges[*edgesCount - 1].weight;
+            (*edgesCount)++;
+        }
+    }
+}
+
+int main() {
+    setlocale(LC_ALL, "Russian");
+    int vertices;
+    char op;
+    char filenameForRead[100];
+    FILE* filenameForRead2;
+    bool isDirected;
+
+        while (1) {
+            printf("\nВыберите тип графа:\n");
+            printf("1 - Ориентированный граф\n");
+            printf("2 - Неориентированный граф\n");
+            printf("Введите номер операции: ");
+            scanf(" %c", &op);
+            if (op == '1') {
+                isDirected = true;
+            }
+            else if (op == '2') {
+                isDirected = false;
+            }
+            else {
+                printf("Некорректный ввод, попробуйте снова.\n");
+                continue;
+            }
+
+            printf("\nВыберите способ ввода графа:\n");
+            printf("1 - Автоматический ввод графа\n");
+            printf("2 - Ручной ввод графа\n");
+            printf("3 - Чтение графа из файла\n");
+            printf("0 - Завершение программы\n");
+            printf("Введите номер операции: ");
+            scanf(" %c", &op);
+            switch (op) {
+            case '1':
+            {
+                srand(time(NULL));
+
+                printf("\nВведите количество вершин в графе: ");
+                scanf("%d", &vertices);
+
+                if (vertices <= 0) {
+                    printf("Введено некорректное количество вершин! Попробуйте снова\n");
+                    break;
+                }
+
+                // определение макс количества рёбер
+                int maxEdgesCount = isDirected ? vertices * (vertices - 1) : vertices * (vertices - 1) / 2;
+                Edge* graph = (Edge*)malloc(maxEdgesCount * sizeof(Edge));
+                if (graph == NULL) {
+                    printf("Ошибка при выделении памяти.\n");
+                    return 1;
+                }
+
+                int edgesCount = 0;
+
+                // создание минимального остовного дерева, добавляя рёбра между последовательными вершинами
+                for (int i = 0; i < vertices - 1; ++i) {
+                    graph[edgesCount].source = i;
+                    graph[edgesCount].destination = i + 1;
+                    graph[edgesCount].weight = (rand() % 21) - 5; // вес
+                    edgesCount++;
+                    if (!isDirected) {
+                        graph[edgesCount].source = i + 1;
+                        graph[edgesCount].destination = i;
+                        graph[edgesCount].weight = graph[edgesCount - 1].weight;
+                        edgesCount++;
+                    }
+                }
+
+                // добавление доп рёбер
+                for (int i = vertices; i < maxEdgesCount; ++i) {
+                    int source = rand() % vertices;
+                    int destination = rand() % vertices;
+                    ensurePathToVertex(graph, &edgesCount, source, destination, isDirected);
+                }
+
+                printGraph(graph, edgesCount); // вызов функции вывода
+                bellmanFord(graph, vertices, edgesCount, 0); // вызов функции выполнения алгоритма
+
+                free(graph); // освобождение памяти
+                break;
+            }
+            case '2': { // Ручной ввод графа
+                printf("\nВведите количество вершин в графе: ");
+                scanf("%d", &vertices);
+
+                if (vertices <= 0) {
+                    printf("Введено некорректное количество вершин! Попробуйте снова\n");
+                    break;
+                }
+
+                // макс количество рёбер
+                int maxEdgesCount = isDirected ? vertices * (vertices - 1) : vertices * (vertices - 1) / 2;
+                Edge* graph = (Edge*)malloc(maxEdgesCount * sizeof(Edge));
+                if (graph == NULL) {
+                    printf("Ошибка при выделении памяти.\n");
+                    return 1;
+                }
+
+                int edgesCount = 0;
+                int source, destination, weight;
+
+                printf("Введите рёбра в формате \"источник конечная вершина вес\" (например, 0 1 5).\n");
+                printf("Введите \"-1 -1 -1\", чтобы завершить ввод.\n");
+
+                while (1) {
+                    printf("Введите ребро: ");
+                    scanf("%d %d %d", &source, &destination, &weight);
+
+                    // Проверка на завершение
+                    if (source == -1 && destination == -1 && weight == -1) {
+                        break;
+                    }
+
+                    // Проверка на валидность введённого ребра
+                    if (source < 0 || source >= vertices || destination < 0 || destination >= vertices) {
+                        printf("Некорректные вершины. Попробуйте снова.\n");
+                        continue;
+                    }
+
+                    // Запись в граф
+                    graph[edgesCount].source = source;
+                    graph[edgesCount].destination = destination;
+                    graph[edgesCount].weight = weight;
+                    edgesCount++;
+                    if (!isDirected) {
+                        graph[edgesCount].source = destination;
+                        graph[edgesCount].destination = source;
+                        graph[edgesCount].weight = weight;
+                        edgesCount++;
+                    }
+                }
+
+                printGraph(graph, edgesCount);
+                bellmanFord(graph, vertices, edgesCount, 0);
+
+                free(graph);
+                break;
+            }
+            case '3':
+            {
+                printf("\nВведите имя файла, для чтения из него графа: ");
+                scanf("%s", filenameForRead);
+                filenameForRead2 = fopen(filenameForRead, "r");
+                if (filenameForRead2 == NULL) {
+                    printf("Не удалось открыть файл, так как файл пустой или имеет не соответствующий вид! Повторите ввод\n\n");
+                    break;
+                }
+                else {
+                    Edge graph[MAX_VERTICES];
+                    int edgesCount = readGraphFromFile(filenameForRead, graph, &vertices, isDirected);
+                    if (edgesCount < 0) {
+                        return 1;
+                    }
+                    printGraph(graph, edgesCount);
+                    bellmanFord(graph, vertices, edgesCount, 0);
+                    break;
+                }
+                fclose(filenameForRead2);
+            }
+            case '0':
+            {
+                return 0;
+                break;
+            }
+            default: {
+                printf("Некорректный ввод, попробуйте снова.\n");
+                break;
+            }
+            }
+        }
+    return 0;
+}
